@@ -45,55 +45,83 @@
    config))
 
 
+(defn get-content-length
+  [query]
+  (alength (.getBytes (cjson/generate-string query))))
+
+
 (defn convert-ac-query
   "Convert an old autocompletion request to the new autocompletion request.
   1. Change the ES query based on the field.
   2. Change HTTP header to point to the correct URI."
   [req q]
-  (let [cfg (get-cfg)
-        domain (get-in q ["aggregations" "autocomplete" "filter" "term" "_domain"])
-        fld (get-in q ["aggregations" "autocomplete" "aggs" "autocomplete" "terms" "field"])
-        fld (if (.endsWith ^String fld ".raw") (subs fld 0 (- (count fld) 4)) fld)
-        typed-by-user (or (get-in q ["query" "match_phrase_prefix" fld "query"]) "")
-        ac-fld (str fld ".autocomplete")
-        size 25]
-    (case (cfg fld)
-      nil nil
-      :completion {:h (for [header req]
-                        (if (cs/starts-with? header "POST")
-                          "POST /moby-advsearch/issue/_suggest? HTTP/1.1"
-                          header))
-                   :q {:fld-suggestions
-                       {:text typed-by-user
-                        :completion {:context {:_domain domain}
-                                     :field ac-fld
-                                     :size size}}}}
+  (when (or ((set (keys q)) "fld-suggestions")
+            ((set (keys q)) "query"))
+   (let [cfg (get-cfg)
+         domain (get-in q ["aggregations" "autocomplete" "filter" "term" "_domain"])
+         fld (get-in q ["aggregations" "autocomplete" "aggs" "autocomplete" "terms" "field"])
+         fld (if (.endsWith fld ".raw") (subs fld 0 (- (count fld) 4)) fld)
+         typed-by-user (or (get-in q ["query" "match_phrase_prefix" fld "query"]) "")
+         ac-fld (str fld ".autocomplete")
+         size 25]
+     (case (cfg fld)
+       nil nil
+       :completion (let [query {:fld-suggestions
+                                {:text typed-by-user
+                                 :completion {:context {:_domain domain}
+                                              :field ac-fld
+                                              :size size}}}]
+                     {:h (for [header req]
+                           (cond
+                             (cs/starts-with? header "POST")
+                             "POST /moby-advsearch/_suggest? HTTP/1.1"
 
-      :ngram-words {:q {:query {:filtered {:query {:match {ac-fld typed-by-user}}
-                                           :filter {:term {:_domain domain}}}}
-                        :aggregations {:fld-suggestions
-                                       {:terms
-                                        {:field (str fld ".raw")
-                                         :size size
-                                         :order {:ranking "desc"}}
-                                        :aggs {:ranking {:max {:script "_score"}}}}}}
-                    :h (for [header req]
-                         (if (cs/starts-with? header "POST")
-                           "POST /moby-advsearch/issue/_search?search_type=count&query_cache=true HTTP/1.1"
-                           header))}
+                             (cs/starts-with? header "Content-Length: ")
+                             (str "Content-Length: " (get-content-length query))
 
-      :ngram-raw {:q {:query {:filtered {:query {:match {ac-fld typed-by-user}}
-                                         :filter {:term {:_domain domain}}}}
-                      :aggregations {:fld-suggestions
-                                     {:terms
-                                      {:field (str fld ".raw")
-                                       :size size
-                                       :order {:ranking "desc"}}
-                                      :aggs {:ranking {:max {:script "_score"}}}}}}
-                  :h (for [header req]
-                       (if (cs/starts-with? header "POST")
-                         "POST /moby-advsearch/issue/_search?search_type=count&query_cache=true HTTP/1.1"
-                         header))})))
+                             :else
+                             header))
+                      :q query})
+
+       :ngram-words (let [query {:query {:filtered {:query {:match {ac-fld typed-by-user}}
+                                                    :filter {:term {:_domain domain}}}}
+                                 :aggregations {:fld-suggestions
+                                                {:terms
+                                                 {:field (str fld ".raw")
+                                                  :size size
+                                                  :order {:ranking "desc"}}
+                                                 :aggs {:ranking {:max {:script "_score"}}}}}}]
+                      {:q query
+                       :h (for [header req]
+                            (cond
+                              (cs/starts-with? header "POST")
+                              "POST /moby-advsearch/issue/_search?search_type=count&query_cache=true HTTP/1.1"
+
+                              (cs/starts-with? header "Content-Length: ")
+                              (str "Content-Length: " (get-content-length query))
+
+                              :else
+                              header))})
+
+       :ngram-raw (let [query {:query {:filtered {:query {:match {ac-fld typed-by-user}}
+                                          :filter {:term {:_domain domain}}}}
+                       :aggregations {:fld-suggestions
+                                      {:terms
+                                       {:field (str fld ".raw")
+                                        :size size
+                                        :order {:ranking "desc"}}
+                                       :aggs {:ranking {:max {:script "_score"}}}}}}]
+                    {:q query
+                     :h (for [header req]
+                          (cond
+                            (cs/starts-with? header "POST")
+                            "POST /moby-advsearch/issue/_search?search_type=count&query_cache=true HTTP/1.1"
+
+                            (cs/starts-with? header "Content-Length: ")
+                            (str "Content-Length: " (get-content-length query))
+
+                            :else
+                            header))})))))
 
 
 (defn decode-hex-string
@@ -108,46 +136,30 @@
 
 (defn -main
   [& args]
-  (let [;;br (BufferedReader. (FileReader. "/Users/mourjo/tmp/sample_ac.txt"))
-        br (BufferedReader. (InputStreamReader. System/in))
+  (let [br (BufferedReader. (InputStreamReader. System/in))
         req (atom [])]
-    (spit "debug.log" "")
-    (spit "test.log" "")
     (try
       (loop [hex-line (.readLine br)]
-        (let [decoded-line (decode-hex-string hex-line)]
-          (spit "debug.log" (str decoded-line) :append true)
-          (doseq [line (cs/split-lines decoded-line)]
-            (spit "test.log" (str line "\n") :append true)
-            (cond
-              ;; Start of a request
-              (.startsWith ^String line "1 ")
-              (swap! req (constantly [line]))
+        (let [decoded-req (decode-hex-string hex-line)
+              http-request (partition-by empty? (cs/split-lines decoded-req))
+              headers (first http-request)
+              body (when (= 3 (count http-request)) (last http-request))]
 
-              ;; empty line after req
-              (empty? line)
-              (swap! req #(conj % line))
+          (if (and body
+                   (= 1 (count body))
+                   (.contains (first body) "autocomplete")
+                   (try (cjson/parse-string (first body)) (catch Exception _ nil)))
 
-              ;; Autocompletion Query: Needs to be changed (req need changing too)
-              ;; (.contains line "\"aggregations\":{\"autocomplete")
-              (.contains line "autocomplete")
-              (try
-                (let [q (cjson/parse-string line)]
-                  (when-let [changed-req (convert-ac-query @req q)]
-                    (println (encode-to-hex-string (str (cs/join "\n" (:h changed-req))
-                                                        "\n"
-                                                        (cjson/generate-string (:q changed-req))))))
-                  (swap! req (constantly [])))
-                (catch JsonParseException _ (swap! req #(conj % line))))
+            ;; using when-let because we removed autocompletions of some fields
+            (when-let [changed-req (convert-ac-query headers (cjson/parse-string (first body)))]
+              (println (encode-to-hex-string (str (cs/join "\n" (:h changed-req))
+                                                  "\n\n"
+                                                  (cjson/generate-string (:q changed-req))))))
 
-              ;; Non-autocompletion query: Return as is
-              (try (cjson/parse-string line) (catch Exception e nil))
-              (do (println (encode-to-hex-string (str (cs/join "\n" @req) "\n" line)))
-                  (swap! req (constantly [])))
-
-              ;; part of a header
-              :else
-              (swap! req #(conj % line)))))
+            (println (encode-to-hex-string (str (cs/join "\n" headers)
+                                                (when body
+                                                  (str "\n\n"
+                                                       (cs/join "\n" body))))))))
         (when-let [line (.readLine br)]
           (recur line)))
       (catch IOException e (IOUtils/closeQuietly br)))))
