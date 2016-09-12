@@ -1,36 +1,11 @@
-# acmap
+# Gor Middleware
 
-FIXME: description
-
-## Installation
-
-Download from http://example.com/FIXME.
+A simple Clojure project which can be used to write a middleware for Gor.
 
 ## Usage
 
-FIXME: explanation
-
-    $ java -jar acmap-0.1.0-standalone.jar [args]
-
-## Options
-
-FIXME: listing of options this app accepts.
-
-## Examples
-
-...
-
-### Bugs
-
-...
-
-### Any Other Sections
-### That You Think
-### Might be Useful
-
-## License
-
-Copyright © 2016 FIXME
-
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
+* Git clone this repository.
+* Rewrite fn `gor-middleware.core/transform-http-msg`.
+* Make a JAR: `lein uberjar`
+* Create a shell file which runs the jar `java -jar gor-middleware-0.2.0-SNAPSHOT.jar`
+* Run Gor with your middleware: `sudo ~/gor --verbose --input-raw :9202 --middleware ../middleware.sh --output-http-stats --output-http http://1.2.3.4:8888`
