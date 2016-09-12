@@ -1,4 +1,4 @@
-(ns acmap.util
+(ns gor-middleware.util
   (:require [clojure.string :as cs])
   (:import org.apache.commons.codec.binary.Hex))
 

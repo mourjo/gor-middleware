@@ -1,6 +1,6 @@
-(ns acmap.core
+(ns gor-middleware.core
   (:gen-class)
-  (:require [acmap.util :as util]
+  (:require [gor-middleware.util :as util]
             [clojure.string :as cs])
   (:import org.apache.commons.io.IOUtils
            java.io.BufferedReader

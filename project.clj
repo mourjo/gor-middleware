@@ -1,4 +1,4 @@
-(defproject acmap "0.1.0-SNAPSHOT"
+(defproject gor-middleware "0.2.0-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
@@ -11,7 +11,7 @@
                  ;; https://mvnrepository.com/artifact/commons-codec/commons-codec
                  [commons-codec/commons-codec "1.2"]
                  [clj-time "0.11.0"]]
-  :main acmap.core
+  :main gor-middleware.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}}
-  :aot [acmap.core])
+  :aot [gor-middleware.core])

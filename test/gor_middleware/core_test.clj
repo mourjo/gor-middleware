@@ -1,6 +1,6 @@
-(ns acmap.core-test
+(ns gor-middleware.core-test
   (:require [clojure.test :refer :all]
-            [acmap.core :refer :all]))
+            [gor-middleware.core :refer :all]))
 
 (deftest a-test
   (testing "FIXME, I fail."
